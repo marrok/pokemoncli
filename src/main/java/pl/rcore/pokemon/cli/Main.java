@@ -59,6 +59,8 @@ public class Main {
                 line = sc.nextLine();
                 if("goto".equalsIgnoreCase(line))
                     goToLocation(go);
+                if("wander".equalsIgnoreCase(line))
+                    wander(go);
                 else if("list-pokemon".equalsIgnoreCase(line))
                     listPokemon(go);
                 else if("catch".equalsIgnoreCase(line))
@@ -81,6 +83,32 @@ public class Main {
                 System.out.println("Exception: " + e.getMessage());
             }
 
+        }
+    }
+
+    private static void wander(PokemonGo go) throws LoginFailedException, RemoteServerException, NoSuchItemException {
+
+        goToLocation(go);
+
+        double delta = 0.09 / 1200;
+        double lat = go.getLatitude();
+        double lng = go.getLongitude();
+
+        Random rand = new Random();
+        for(int i = 0; i < 1000; i++)
+        {
+            lootPokestop(go);
+            catchAllPokemon(go);
+            lootPokestop(go);
+            catchAllPokemon(go);
+
+            lat = lat - delta + ((rand.nextInt(100) - 50) / 1000000.0);
+            lng = lng + ((rand.nextInt(100) - 50) / 1000000.0);
+
+            System.out.println("Going to location: ("+ lat + "," +lng +")");
+            go.setLocation(lat, lng, 1);
+
+            try{ Thread.sleep(1000 + rand.nextInt(500) - 250);} catch (Exception ex){};
         }
     }
 
@@ -176,6 +204,7 @@ public class Main {
         for(Pokemon p : ps) {
             System.out.print("Pokemon transfer pokemon " + p.getPokemonId().name() + " cp " + p.getCp() + " y|n: ");
             String transfer = scanner.nextLine();
+
             if ("y".equalsIgnoreCase(transfer)) {
                 ReleasePokemonResponseOuterClass.ReleasePokemonResponse.Result r = p.transferPokemon();
                 System.out.println(p.getPokemonId().name() + " transfer result: " + r.name());
