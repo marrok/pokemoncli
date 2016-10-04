@@ -1,9 +1,14 @@
 package pl.rcore.pokemon.cli;
 
 import POGOProtos.Data.PokemonDataOuterClass;
+import POGOProtos.Networking.Responses.ReleasePokemonResponseOuterClass;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.pokegoapi.api.PokemonGo;
 import com.pokegoapi.api.inventory.Pokeball;
+import com.pokegoapi.api.map.Map;
+import com.pokegoapi.api.map.MapObjects;
+import com.pokegoapi.api.map.fort.Pokestop;
+import com.pokegoapi.api.map.fort.PokestopLootResult;
 import com.pokegoapi.api.map.pokemon.CatchResult;
 import com.pokegoapi.api.map.pokemon.CatchablePokemon;
 import com.pokegoapi.api.map.pokemon.encounter.EncounterResult;
@@ -17,11 +22,9 @@ import com.pokegoapi.exceptions.NoSuchItemException;
 import com.pokegoapi.exceptions.RemoteServerException;
 import okhttp3.OkHttpClient;
 
-import java.util.DoubleSummaryStatistics;
-import java.util.List;
-import java.util.Optional;
-import java.util.Scanner;
+import java.util.*;
 import java.util.logging.Logger;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -29,9 +32,6 @@ import java.util.stream.Stream;
  * Created by mariusz on 2016-09-29.
  */
 public class Main {
-
-    private static String TOKEN = "4/P68KW3u8TyOfJvT5XGNiitvRHzHFPdQj2pSTRjvTuG8";
-    private static Logger logger = Logger.getLogger(Main.class.getName());
 
     public static void main(String args[]) throws LoginFailedException, RemoteServerException, NoSuchItemException {
 
@@ -51,20 +51,28 @@ public class Main {
 
         String line = "";
 
-        while(!"exit".equals(line))
+        while(true)
         {
             try
             {
-                System.out.print("Enter command: goto, ls, exit, catch, transfer: ");
+                System.out.print("Enter command: goto|list-pokemon|catch|catch-all|transfer|transfer-all|loot|list-pokestop|exit: ");
                 line = sc.nextLine();
                 if("goto".equalsIgnoreCase(line))
                     goToLocation(go);
-                else if("transfer".equalsIgnoreCase(line))
-                    transferPokemons(go);
-                else if("ls".equalsIgnoreCase(line))
-                    listPokemons(go);
+                else if("list-pokemon".equalsIgnoreCase(line))
+                    listPokemon(go);
                 else if("catch".equalsIgnoreCase(line))
                     catchPokemon(go);
+                else if("catch-all".equalsIgnoreCase(line))
+                    catchAllPokemon(go);
+                else if("transfer".equalsIgnoreCase(line))
+                    transferPokemons(go);
+                else if("transfer-all".equalsIgnoreCase(line))
+                    transferAllPokemons(go);
+                else if("list-pokestop".equalsIgnoreCase(line))
+                    listPokestop(go);
+                else if("loot".equalsIgnoreCase(line))
+                    lootPokestop(go);
                 else if("exit".equalsIgnoreCase(line))
                     break;
             }
@@ -73,6 +81,41 @@ public class Main {
                 System.out.println("Exception: " + e.getMessage());
             }
 
+        }
+    }
+
+    private static void listPokestop(PokemonGo go) throws LoginFailedException, RemoteServerException {
+        List<Pokestop> stops = go.getMap().getMapObjects().getPokestops().stream().filter(x-> x.inRange()).collect(Collectors.toList());
+        for(Pokestop s : stops) {
+            System.out.println("Pokestop: '" + s.getDetails().getName() + "' can loot: " + s.canLoot());
+        }
+    }
+
+    private static void lootPokestop(PokemonGo go) throws LoginFailedException, RemoteServerException {
+
+        List<Pokestop> stops = go.getMap().getMapObjects().getPokestops().stream().filter(x-> x.inRange() && x.canLoot()).collect(Collectors.toList());
+
+        for(Pokestop p : stops) {
+            PokestopLootResult r = p.loot();
+            List<String> awards = r.getItemsAwarded().stream().map(x -> x.getItemId().name()).collect(Collectors.toList());
+            System.out.println("Pokestop loot result: " + String.join(", ", awards));
+            try{ Thread.sleep(500);} catch (Exception e){};
+        }
+    }
+
+    private static void catchAllPokemon(PokemonGo go) throws LoginFailedException, RemoteServerException, NoSuchItemException {
+
+        for(CatchablePokemon p : go.getMap().getCatchablePokemon()) {
+            EncounterResult e = p.encounterNormalPokemon();
+
+            if(e.wasSuccessful()) {
+                CatchResult result = p.catchPokemon();
+                System.out.println(p.getPokemonId().name() + " catch result: " + result.getStatus());
+                try{ Thread.sleep(500);} catch (Exception ex){};
+            }
+            else {
+                System.out.println("Encounter of pokemon " + p.getPokemonId().name() + " was not successfull");
+            }
         }
     }
 
@@ -105,9 +148,8 @@ public class Main {
                 if("y".equalsIgnoreCase(berries))
                     options.useRazzberries(true);
 
-                p.get().encounterNormalPokemon().getPokemonData().getCp();
                 CatchResult result = p.get().catchPokemon(options);
-                System.out.println(result.getStatus());
+                System.out.println(p.get().getPokemonId().name() + " catch result: " + result.getStatus());
             }
             else
             {
@@ -120,12 +162,34 @@ public class Main {
         }
     }
 
+    private static void transferAllPokemons(PokemonGo go) throws LoginFailedException, RemoteServerException {
+
+        List<Pokemon> ps = new LinkedList<>(go.getInventories().getPokebank().getPokemons());
+        Collections.sort(ps, (x, y) -> {
+            int result = x.getPokemonId().name().compareTo(y.getPokemonId().name());
+            return (result == 0) ? x.getCp() - y.getCp() : result;
+
+        });
+
+        Scanner scanner = new Scanner(System.in);
+
+        for(Pokemon p : ps) {
+            System.out.print("Pokemon transfer pokemon " + p.getPokemonId().name() + " cp " + p.getCp() + " y|n: ");
+            String transfer = scanner.nextLine();
+            if ("y".equalsIgnoreCase(transfer)) {
+                ReleasePokemonResponseOuterClass.ReleasePokemonResponse.Result r = p.transferPokemon();
+                System.out.println(p.getPokemonId().name() + " transfer result: " + r.name());
+            }
+        }
+    }
+
     private static void transferPokemons(PokemonGo go) throws LoginFailedException, RemoteServerException {
+
         List<Pokemon> ps = go.getInventories().getPokebank().getPokemons().stream()
                                 .sorted((x, y) -> x.getPokemonId().name().compareTo(y.getPokemonId().name()))
                                 .collect(Collectors.toList());
         for(Pokemon p : ps)
-            System.out.println("Pokemon: " + p.getPokemonId().name() + " cp: " + p.getCp());
+            System.out.println("Pokemon: '" + p.getPokemonId().name() + "' cp: " + p.getCp());
 
         System.out.print("Pokemon name: ");
         Scanner scanner = new Scanner(System.in);
@@ -133,27 +197,26 @@ public class Main {
 
         ps = ps.stream().filter(x -> name.equals(x.getPokemonId().name())).collect(Collectors.toList());
 
-        for(Pokemon p : ps)
-        {
-            System.out.print("Pokemon transfer pokemon " + p.getPokemonId().name() + " cp: " + p.getCp() + " y|n");
+        for(Pokemon p : ps) {
+            System.out.print("Pokemon transfer pokemon " + p.getPokemonId().name() + " cp " + p.getCp() + " y|n: ");
             String transfer = scanner.nextLine();
-            if ("y".equalsIgnoreCase(transfer))
-                p.transferPokemon();
+            if ("y".equalsIgnoreCase(transfer)) {
+                ReleasePokemonResponseOuterClass.ReleasePokemonResponse.Result r = p.transferPokemon();
+                System.out.println(p.getPokemonId().name() + " transfer result: " + r.name());
+            }
         }
     }
 
-    private static void listPokemons(PokemonGo go) throws LoginFailedException, RemoteServerException
-    {
+    private static void listPokemon(PokemonGo go) throws LoginFailedException, RemoteServerException {
+
         List<CatchablePokemon> pokemons = go.getMap().getCatchablePokemon();
-        for(CatchablePokemon p : pokemons)
-        {
+        for(CatchablePokemon p : pokemons) {
             PokemonDataOuterClass.PokemonData pd =  p.encounterNormalPokemon().getPokemonData();
-            System.out.println("Pokemon: " + pd.getPokemonId().name() + " cp: " + pd.getCp());
+            System.out.println("Pokemon: '" + pd.getPokemonId().name() + "' cp: " + pd.getCp());
         }
     }
 
-    private static void goToLocation(PokemonGo go)
-    {
+    private static void goToLocation(PokemonGo go) {
         Scanner scanner = new Scanner(System.in);
 
         System.out.print("Enter lat,lng: ");
